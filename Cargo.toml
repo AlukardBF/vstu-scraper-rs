@@ -1,0 +1,19 @@
+[package]
+name = "scraping"
+version = "0.0.1"
+authors = ["Dmitriy Kholkin <alukard.develop@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "scraping"
+path = "src/main.rs"
+
+[lib]
+name = "page_scraper"
+path = "src/lib/lib.rs"
+
+[dependencies]
+prettytable-rs = "0.8.0"
+reqwest = "0.11.0"
+soup = "0.5.0"
+tokio = { version = "1.1.0", features = ["rt-multi-thread", "macros"] }
