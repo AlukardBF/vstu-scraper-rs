@@ -1,9 +1,9 @@
+use prettytable::{cell, row, Table};
 use std::fs::File;
 
-use prettytable::{cell, row, Table};
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let plants = page_scraper::scraper().await?;
+    let plants = page_scraper::Scraper::new(10).scraper().await?;
     let mut file = File::create("result.txt")?;
     plants.iter().for_each(|plant| {
         let mut table = Table::new();

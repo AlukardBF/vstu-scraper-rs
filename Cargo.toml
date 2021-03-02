@@ -1,11 +1,11 @@
 [package]
-name = "scraping"
-version = "0.0.1"
+name = "scraper"
+version = "0.1.0"
 authors = ["Dmitriy Kholkin <alukard.develop@gmail.com>"]
 edition = "2018"
 
 [[bin]]
-name = "scraping"
+name = "scraper"
 path = "src/main.rs"
 
 [lib]
@@ -13,6 +13,7 @@ name = "page_scraper"
 path = "src/lib/lib.rs"
 
 [dependencies]
+futures = "0.3.13"
 prettytable-rs = "0.8.0"
 reqwest = "0.11.0"
 soup = "0.5.0"
