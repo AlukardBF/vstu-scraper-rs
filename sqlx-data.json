@@ -1,0 +1,23 @@
+{
+  "db": "SQLite",
+  "e83be2736c7782848bc9dfb02d53abec49d057558a52bcff2655e4fbed412eb8": {
+    "query": "\n            INSERT INTO plants (\n                name, temperature, humidity, illumination, watering,\n                soil, fertilizer, transplant, propagation, features\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Right": 10
+      },
+      "nullable": []
+    }
+  },
+  "fea71471d171c06e6475f24993df88c078bfe79c02404dfb975729aab2a3ae73": {
+    "query": "\n            CREATE TABLE IF NOT EXISTS plants\n            (\n                name TEXT NOT NULL,\n                temperature TEXT,\n                humidity TEXT,\n                illumination TEXT,\n                watering TEXT,\n                soil TEXT,\n                fertilizer TEXT,\n                transplant TEXT,\n                propagation TEXT,\n                features TEXT\n            );\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Right": 0
+      },
+      "nullable": []
+    }
+  }
+}

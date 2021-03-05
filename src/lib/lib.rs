@@ -1,3 +1,6 @@
+pub mod database;
+
+use anyhow::Result;
 use futures::StreamExt;
 use soup::{NodeExt, QueryBuilderExt};
 
@@ -6,27 +9,43 @@ pub struct Houseplant {
     pub name: String,
     pub attributes: Attributes,
 }
-pub type Attributes = Vec<Attribute>;
+#[derive(Debug, Default)]
+pub struct Attributes {
+    pub temperature: Option<Attribute>,
+    pub humidity: Option<Attribute>,
+    pub illumination: Option<Attribute>,
+    pub watering: Option<Attribute>,
+    pub soil: Option<Attribute>,
+    pub fertilizer: Option<Attribute>,
+    pub transplant: Option<Attribute>,
+    pub propagation: Option<Attribute>,
+    pub features: Option<Attribute>,
+}
 #[derive(Debug)]
 pub struct Attribute {
     pub parameter: String,
     pub value: String,
 }
 
-pub struct Scraper {
+pub struct Scraper<T: database::Database> {
     client: reqwest::Client,
     concurrent_tasks: usize,
+    database: Option<T>,
 }
 
-impl Scraper {
-    pub fn new(concurrent_tasks: usize) -> Self {
+impl<T> Scraper<T>
+where
+    T: database::Database,
+{
+    pub fn new(concurrent_tasks: usize, database: Option<T>) -> Self {
         Scraper {
             client: reqwest::Client::new(),
             concurrent_tasks,
+            database,
         }
     }
 
-    pub async fn scraper(&self) -> Result<Vec<Houseplant>, reqwest::Error> {
+    pub async fn scraper(&self) -> Result<Vec<Houseplant>> {
         // Get title page
         let url = "https://komnatnie-rastenija.ru/";
         let response = self.client.get(url).send().await?;
@@ -57,7 +76,16 @@ impl Scraper {
 
         // Parse all plants info
         let plants_info = futures::stream::iter(plants_url)
-            .map(|url| async move { self.parse_houseplant(&url).await })
+            .map(|url| async move {
+                let opt_plant = self.parse_houseplant(&url).await;
+                let plant = opt_plant.as_ref().unwrap();
+                if let Some(db) = &self.database {
+                    db.insert(plant)
+                        .await
+                        .expect("Failed to insert info into database");
+                }
+                opt_plant
+            })
             .buffer_unordered(self.concurrent_tasks)
             .collect::<Vec<_>>()
             .await
@@ -141,7 +169,7 @@ impl Scraper {
             // Parse table's rows
             let body = node.parent().unwrap().parent().unwrap();
             let nodes = body.children().filter(|node| node.name() == "tr");
-            let attributes = nodes
+            let list = nodes
                 .map(|tr| {
                     let mut children = tr.children();
                     let td1 = children.next().expect("can't find td").text();
@@ -151,22 +179,88 @@ impl Scraper {
                         value: td2,
                     }
                 })
-                .collect::<Attributes>();
+                .collect::<Vec<Attribute>>();
+            let attrs = self.parse_attributes(list).ok()?;
             Some(Houseplant {
                 name: plant_name,
-                attributes,
+                attributes: attrs,
             })
         } else {
             None
         }
     }
+
+    fn parse_attributes(&self, list: Vec<Attribute>) -> Result<Attributes> {
+        lazy_static::lazy_static! {
+            static ref RE: regex::Regex = regex::Regex::new(
+                concat!(
+                    r#"(?P<temp>температ)|"#,
+                    r#"(?P<hum>влажн)|"#,
+                    r#"(?P<illum>освещен)|"#,
+                    r#"(?P<water>полив)|"#,
+                    r#"(?P<soil>грунт)|"#,
+                    r#"(?P<fertil>подкорм|удобрен)|"#,
+                    r#"(?P<trans>пересад)|"#,
+                    r#"(?P<prop>размнож)|"#,
+                    r#"(?P<feature>особен)"#
+                )
+            ).unwrap();
+        }
+
+        let mut attrs = Attributes::default();
+        for item in list {
+            let param = item.parameter.to_lowercase();
+            let caps: Option<regex::Captures> = RE.captures(&param);
+            if caps.is_none() {
+                attrs.features = Some(item);
+                continue;
+            }
+            let caps = caps.unwrap();
+            if let Some(_) = caps.name("temp") {
+                attrs.temperature = Some(item);
+            } else if let Some(_) = caps.name("hum") {
+                attrs.humidity = Some(item);
+            } else if let Some(_) = caps.name("illum") {
+                attrs.illumination = Some(item);
+            } else if let Some(_) = caps.name("water") {
+                attrs.watering = Some(item);
+            } else if let Some(_) = caps.name("soil") {
+                attrs.soil = Some(item);
+            } else if let Some(_) = caps.name("fertil") {
+                attrs.fertilizer = Some(item);
+            } else if let Some(_) = caps.name("trans") {
+                attrs.transplant = Some(item);
+            } else if let Some(_) = caps.name("prop") {
+                attrs.propagation = Some(item);
+            } else if let Some(_) = caps.name("feature") {
+                attrs.features = Some(item);
+            }
+        }
+        Ok(attrs)
+    }
 }
 
-impl Default for Scraper {
+impl<T> Default for Scraper<T>
+where
+    T: database::Database,
+{
     fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
             concurrent_tasks: 5,
+            database: None,
         }
+    }
+}
+
+trait OptArg {
+    fn get_value(&self) -> Option<&str>;
+}
+
+impl OptArg for Option<Attribute> {
+    fn get_value(&self) -> Option<&str> {
+        self.as_ref()
+            .map(|x| Some(x.value.as_str()))
+            .unwrap_or(None)
     }
 }
