@@ -1,12 +1,15 @@
 pub mod database;
 
-use anyhow::Result;
+use std::{io::Write, path::PathBuf};
+
+use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use soup::{NodeExt, QueryBuilderExt};
 
 #[derive(Debug)]
 pub struct Houseplant {
     pub name: String,
+    pub image: String,
     pub attributes: Attributes,
 }
 #[derive(Debug, Default)]
@@ -31,17 +34,19 @@ pub struct Scraper<T: database::Database> {
     client: reqwest::Client,
     concurrent_tasks: usize,
     database: Option<T>,
+    image_dir: PathBuf,
 }
 
 impl<T> Scraper<T>
 where
     T: database::Database,
 {
-    pub fn new(concurrent_tasks: usize, database: Option<T>) -> Self {
+    pub fn new(concurrent_tasks: usize, image_dir: &str, database: Option<T>) -> Self {
         Scraper {
             client: reqwest::Client::new(),
             concurrent_tasks,
             database,
+            image_dir: PathBuf::from(image_dir),
         }
     }
 
@@ -77,12 +82,13 @@ where
         // Parse all plants info
         let plants_info = futures::stream::iter(plants_url)
             .map(|url| async move {
-                let opt_plant = self.parse_houseplant(&url).await;
-                let plant = opt_plant.as_ref().unwrap();
-                if let Some(db) = &self.database {
-                    db.insert(plant)
-                        .await
-                        .expect("Failed to insert info into database");
+                let opt_plant = self.parse_houseplant(&url).await.ok();
+                if let Some(plant) = opt_plant.as_ref() {
+                    if let Some(db) = &self.database {
+                        db.insert(plant)
+                            .await
+                            .expect("Failed to insert info into database");
+                    }
                 }
                 opt_plant
             })
@@ -147,9 +153,9 @@ where
         Some(plants_url)
     }
 
-    async fn parse_houseplant(&self, url: &str) -> Option<Houseplant> {
-        let response = self.client.get(url).send().await.ok()?;
-        let html = response.text().await.ok()?;
+    async fn parse_houseplant(&self, url: &str) -> Result<Houseplant> {
+        let response = self.client.get(url).send().await?;
+        let html = response.text().await?;
 
         let soup = soup::Soup::new(&html);
         // Parse plant name
@@ -159,6 +165,15 @@ where
             .expect("Can't find title")
             .text();
         let plant_name = plant_name.split('—').next().unwrap().to_string();
+
+        // Parse image url
+        let image_url = soup
+            .attr("itemprop", "url image")
+            .find()
+            .ok_or(anyhow!("image not found"))?
+            .get("data-src")
+            .expect("Can't parse plant image url");
+        let image_filename = self.download_image(&image_url).await?;
 
         // Parse table
         if let Some(node) = soup
@@ -180,13 +195,14 @@ where
                     }
                 })
                 .collect::<Vec<Attribute>>();
-            let attrs = self.parse_attributes(list).ok()?;
-            Some(Houseplant {
+            let attrs = self.parse_attributes(list)?;
+            Ok(Houseplant {
                 name: plant_name,
+                image: image_filename,
                 attributes: attrs,
             })
         } else {
-            None
+            Err(anyhow!("Plant table not found"))
         }
     }
 
@@ -216,27 +232,53 @@ where
                 continue;
             }
             let caps = caps.unwrap();
-            if let Some(_) = caps.name("temp") {
+            if caps.name("temp").is_some() {
                 attrs.temperature = Some(item);
-            } else if let Some(_) = caps.name("hum") {
+            } else if caps.name("hum").is_some() {
                 attrs.humidity = Some(item);
-            } else if let Some(_) = caps.name("illum") {
+            } else if caps.name("illum").is_some() {
                 attrs.illumination = Some(item);
-            } else if let Some(_) = caps.name("water") {
+            } else if caps.name("water").is_some() {
                 attrs.watering = Some(item);
-            } else if let Some(_) = caps.name("soil") {
+            } else if caps.name("soil").is_some() {
                 attrs.soil = Some(item);
-            } else if let Some(_) = caps.name("fertil") {
+            } else if caps.name("fertil").is_some() {
                 attrs.fertilizer = Some(item);
-            } else if let Some(_) = caps.name("trans") {
+            } else if caps.name("trans").is_some() {
                 attrs.transplant = Some(item);
-            } else if let Some(_) = caps.name("prop") {
+            } else if caps.name("prop").is_some() {
                 attrs.propagation = Some(item);
-            } else if let Some(_) = caps.name("feature") {
+            } else if caps.name("feature").is_some() {
                 attrs.features = Some(item);
             }
         }
         Ok(attrs)
+    }
+
+    async fn download_image(&self, image_url: &str) -> Result<String> {
+        // Download image
+        let response = self
+            .client
+            .get(image_url)
+            .send()
+            .await
+            .with_context(|| "Can't get response for image")?;
+        let image_bytes = response
+            .bytes()
+            .await
+            .with_context(|| "Can't get bytes from response")?;
+        // Save to file
+        let current_time = chrono::offset::Local::now();
+        let current_millis = current_time.timestamp_millis();
+        let image_dir = &self.image_dir;
+        let image_filename = current_millis.to_string() + ".jpg";
+        let image_path = image_dir.join(&image_filename);
+        std::fs::create_dir_all(image_dir).expect("Can't create image dir");
+        let mut image_file = std::fs::File::create(image_path).expect("Can't create image file");
+        image_file
+            .write_all(&image_bytes)
+            .expect("Error in writing bytes to image file");
+        Ok(image_filename)
     }
 }
 
@@ -249,6 +291,7 @@ where
             client: reqwest::Client::new(),
             concurrent_tasks: 5,
             database: None,
+            image_dir: PathBuf::from("./images"),
         }
     }
 }

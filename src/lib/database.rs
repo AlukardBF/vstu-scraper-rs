@@ -21,6 +21,7 @@ impl Sqlite {
             CREATE TABLE IF NOT EXISTS plants
             (
                 name TEXT NOT NULL,
+                image TEXT,
                 temperature TEXT,
                 humidity TEXT,
                 illumination TEXT,
@@ -58,12 +59,13 @@ impl Database for Sqlite {
         let _res = sqlx::query!(
             r#"
             INSERT INTO plants (
-                name, temperature, humidity, illumination, watering,
+                name, image, temperature, humidity, illumination, watering,
                 soil, fertilizer, transplant, propagation, features
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             plant.name,
+            plant.image,
             temperature,
             humidity,
             illumination,

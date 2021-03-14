@@ -9,6 +9,7 @@
         "printstd",
         "ptable",
         "reqwest",
-        "sqlx"
+        "sqlx",
+        "chrono"
     ]
 }
